@@ -1,9 +1,11 @@
 {
   "name": "node-starter",
-  "version": "0.0.0",
   "private": true,
+  "main": "index.mjs",
   "dependencies": {
+    "wabt": "1.0.17"
   },
   "scripts": {
+    "start": "node ./index.mjs"
   }
 }
