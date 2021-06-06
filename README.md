@@ -2,52 +2,57 @@
 
 [Edit on StackBlitz ⚡️](https://stackblitz.com/edit/wasm-event-loop)
 
-This is a demo of event loop inside WebAssembly. The sample implements an async word counter, given an URL count the words in body.
+This is a demo of event loop inside WebAssembly. The sample implements an async function that sums values from two async other async functions.
 
-Pseudo-code of async word count in WebAssembly
+Pseudo-code of async sum in WebAssembly
 ```js
-async function countWordsInBody(url) {
-  const body = await httpGet(url);
+import {getX, getY} from './external.js';
 
-  let words = 0;
-  let currentlyWord = false;
-  if (!isWhitespace(body.charCodeAt(0))) {
-    words = 1;
-    currentlyWord = true;
-  }
+export async function sum(): i32 {
+  const xValue = await getX();
+  const yValue = await getY();
+  return xValue + yValue;
+}
+```
 
-  for (let i = 0; i < body.length; i++) {
-    if (isWhitespace(body.charCodeAt(i))) {
-      if (currentlyWord) {
-        // word ended
-        currentlyWord = false;
-      } else {
-        // consecutive whitespace, keep going
-      }
-    } else {
-      if (currentlyWord) {
-        // consecutive chars in a word, keep going
-      } else {
-        // start of new word
-        words += 1;
-        currentlyWord = true;
-      }
-    }
-  }
-  
-  return words;
+...as promises
+```js
+import {getX, getY} from './external.js';
+
+export function sum(): Promise<i32> {
+  return getX()
+    .then((xValue) => {
+      return getY()
+        .then((yValue) => {
+          return xValue + yValue;
+        });
+    });
+}
+```
+
+which is then broken down along the promise closures
+```js
+import {createScope, setScopeValue, getScopeValue, deleteScope} from './closure.js';
+import {then} from './async.js';
+import {getX, getY} from './external.js';
+
+export function sum(): u16 { // u16 is pointer to promise
+  const xPromise = getX();
+  const sumClosure1ScopePointer = createScope();
+  return then(xPromise, sumClosure1, sumClosure1ScopePointer);
 }
 
-function isWhitespace(charCode) {
-  switch (charCode) {
-    case 9: // \t
-    case 10: // \n
-    case 12: // \f
-    case 13: // \r
-    case 32: // space
-      return true;
-    default:
-      return false;
-  }
+export function sumClosure1(sumClosure1ScopePointer: u16, xValue: i32): u16 {
+  deleteScope(sumClosure1ScopePointer);
+  const yPromise = getY();
+  const sumClosure2ScopePointer = createScope();
+  setScopeValue(sumClosure2ScopePointer, 'xValue', 'i32', xValue);
+  return then(yPromise, sumClosure2, sumClosure2ScopePointer);
+}
+
+export function sumClosure2(sumClosure2ScopePointer: u16, yValue: i32): i32 {
+  const xValue = getScopeValue(sumClosure2ScopePointer, 'xValue');
+  deleteScope(sumClosure2ScopePointer);
+  return xValue + yValue;
 }
 ```
