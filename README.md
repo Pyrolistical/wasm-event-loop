@@ -30,7 +30,7 @@ export function sum(): Promise<i32> {
 }
 ```
 
-which is then broken down along the promise closures
+...which is then broken down along the promise closures
 ```js
 import {createScope, setScopeValue, getScopeValue, deleteScope} from './closure.js';
 import {then} from './async.js';
@@ -55,4 +55,24 @@ export function sumClosure2(sumClosure2ScopePointer: u16, yValue: i32): i32 {
   deleteScope(sumClosure2ScopePointer);
   return xValue + yValue;
 }
+```
+
+On the JavaScript side
+```js
+const memory = new WebAssembly.Memory();
+const managedMemory = ManagedMemory(memory);
+const {instance: {exports: sum, sumClosure1, sumClosure2} = WebAssembly.instanitate(module, {
+  async: {
+    promises: managedMemory.
+  },
+  external: {
+    getX() {
+      return wasmPromise.resolve(42);
+    },
+    getY() {
+      return wasmPromise.resolve(69);
+    }
+  }
+});
+
 ```
