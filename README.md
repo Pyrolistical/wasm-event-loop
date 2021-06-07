@@ -9,8 +9,8 @@ Pseudo-code of async sum in WebAssembly
 import {getX, getY} from './external.js';
 
 export async function sum(): i32 {
-  const xValue = await getX();
-  const yValue = await getY();
+  const xValue: i32 = await getX();
+  const yValue: i32 = await getY();
   return xValue + yValue;
 }
 ```
@@ -21,38 +21,39 @@ import {getX, getY} from './external.js';
 
 export function sum(): Promise<i32> {
   return getX()
-    .then((xValue) => {
+    .then((const xValue: i32) => {
       return getY()
-        .then((yValue) => {
+        .then((const yValue: i32) => {
           return xValue + yValue;
         });
     });
 }
 ```
 
-...which is then broken down along the promise closures
+...closures converted to functions
 ```js
-import {createScope, setScopeValue, getScopeValue, deleteScope} from './closure.js';
+import {createContext, deleteContext} from './closure.js';
 import {then} from './async.js';
 import {getX, getY} from './external.js';
 
 export function sum(): u16 { // u16 is pointer to promise
   const xPromise = getX();
-  const sumClosure1ScopePointer = createScope();
-  return then(xPromise, sumClosure1, sumClosure1ScopePointer);
+  const sumClosure1ContextPointer = createContext(sumClosure1);
+  return then(xPromise, sumClosure1ContextPointer);
 }
 
-export function sumClosure1(sumClosure1ScopePointer: u16, xValue: i32): u16 {
-  deleteScope(sumClosure1ScopePointer);
+export function sumClosure1(sumClosure1ContextPointer: u16, xValue: i32): u16 {
+  deleteContext(sumClosure1ContextPointer);
   const yPromise = getY();
-  const sumClosure2ScopePointer = createScope();
-  setScopeValue(sumClosure2ScopePointer, 'xValue', 'i32', xValue);
-  return then(yPromise, sumClosure2, sumClosure2ScopePointer);
+  const sumClosure2ContextPointer = createContext(sumClosure2, {
+    xValue
+  });
+  return then(yPromise, sumClosure2ContextPointer);
 }
 
-export function sumClosure2(sumClosure2ScopePointer: u16, yValue: i32): i32 {
-  const xValue = getScopeValue(sumClosure2ScopePointer, 'xValue');
-  deleteScope(sumClosure2ScopePointer);
+export function sumClosure2(sumClosure2ContextPointer: u16, yValue: i32): i32 {
+  const {xValue} = sumClosure2ContextPointer.scope;
+  deleteContext(sumClosure2ContextPointer);
   return xValue + yValue;
 }
 ```
