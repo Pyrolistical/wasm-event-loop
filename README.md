@@ -57,23 +57,3 @@ export function sumClosure2(sumClosure2ContextPointer: u16, yValue: i32): i32 {
   return xValue + yValue;
 }
 ```
-
-On the JavaScript side
-```js
-const memory = new WebAssembly.Memory();
-const managedMemory = ManagedMemory(memory);
-const {instance: {exports: sum, sumClosure1, sumClosure2} = WebAssembly.instanitate(module, {
-  async: {
-    promises: managedMemory.
-  },
-  external: {
-    getX() {
-      return wasmPromise.resolve(42);
-    },
-    getY() {
-      return wasmPromise.resolve(69);
-    }
-  }
-});
-
-```
