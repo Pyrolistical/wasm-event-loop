@@ -7,25 +7,31 @@ async function main() {
     'async-adder.wat',
     `(module
         (import "global" "memory" (memory 1))
+        (import "global" "malloc" (func $malloc (param $bytes i32) (result i32)))
         (import "global" "table" (table 2 funcref))
         ;;(elem (i32.const 0) $sumClosure1 $sumClosure2)
-        (import "closure" "createContext" (func $createContext (param $tableIndex i32) (param $scopeOffset i32) (result i32)))
-        (import "closure" "deleteContext" (func $deleteContext (param $contextPointer i32)))
         (import "promise" "then" (func $then (param $promisePointer i32) (param $contextPointer i32) (result i32)))
         (import "promise" "resolve" (func $resolve (param $resultPointer i32) (result i32)))
         (import "external" "getX" (func $getX (result i32)))
         (import "external" "getY" (func $getY (result i32)))
-        (func $malloc (param $bytes i32) (result i32) (local $result i32);; bump allocator
-          i32.const 0
-          i32.load
-          local.set $result
-          i32.const 0
-          local.get $result
-          local.get $bytes
-          i32.add
+        
+        (func $createContext (param $tableIndex i32) (param $scopePointer i32) (result i32)) (local $pointer i32)
+          i32.const 8
+          call $malloc
+          local.tee $pointer
+          local.get $tableIndex
           i32.store
-          local.get $result
+          local.get $pointer
+          i32.const 4
+          i32.add
+          local.get $scopePointer
+          i32.store
+          local.get $pointer
         )
+        (func $deleteContext (param $contextPointer i32))
+          nop
+        )
+
         (func (export "sum") (result i32) (local $xPromisePointer i32) (local $closurePointer i32)
           call $getX
           local.set $xPromisePointer
@@ -83,33 +89,84 @@ async function main() {
 
   console.log(module.toText({}));
 
+  const memory = new WebAssembly.Memory({
+    initial: 1
+  });
+  const i32Memory = new Int32Array(memory.buffer);
+  const i8Memory = new Int8Array(memory.buffer);
+  i32Memory[0] = 4;
+  function malloc (bytes) {
+    // bump allocator
+    const next = i32Memory[0];
+    i32Memory[0] = next + Math.ceil(bytes);
+    return next;
+  }
+  const PROMISE_ENUM = {
+    PENDING: 0,
+    RESOLVED: 1,
+    FAILED: 2
+  }
+  function createPromise(bytes) {
+    const pointer = malloc(1 + bytes);
+    i8Memory[pointer] = PROMISE_ENUM.PENDING;
+    return pointer;
+  }
+  function resolvePromise(pointer, value) {
+    i8Memory.set(value, pointer + 1);
+    i8Memory[pointer] = PROMISE_ENUM.RESOLVED;
+  }
+  const promiseChains = {};
+  const bindClosurePromise = {};
+
+  const table = new WebAssembly.Table({
+    initial: 2,
+    element: 'anyfunc'
+  });
+
   const {
     instance: {
-      exports: { count }
+      exports
     }
   } = await WebAssembly.instantiate(module.toBinary({}).buffer, {
     global: {
-      memory: new WebAssembly.Memory({
-        initial: 1
-      }),
-      table: new WebAssembly.Table({
-        initial: 2,
-        element: 'anyfunc'
-      })
-    },
-    closure: {
-      createContext() {},
-      deleteContext() {}
+      memory,
+      malloc,
+      table
     },
     promise: {
-      then() {},
+      then(parentPromisePointer, closurePointer) {
+        promiseChains[parentPromisePointer] = promiseChains[parentPromisePointer] || [];
+        promiseChains[parentPromisePointer].push(closurePointer);
+        const promisePointer = createPromise(0);
+        bindClosurePromise[closurePointer] = promisePointer;
+        return promisePointer;
+      },
       resolve() {}
     },
     external: {
-      getX() {},
-      getY() {}
+      getX() {
+        const promisePointer = createPromise(4);
+        getX().then((x) => resolvePromise(promisePointer, x))
+        return promisePointer;
+      },
+      getY() {
+        return wasmPromise.resolve(69);
+      }
     }
   });
-  // console.log(count());
+
+  async function getX() {
+    return Promise.resolve(42);
+  }
+
+  async function getY() {
+    return new Promise((resolve) => setTimeout(() => resolve(69), 100));
+  }
+
+  async function sum() {
+    const promise = exports.sum();
+  }
+
+  console.log(await sum())
 }
 main();
