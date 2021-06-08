@@ -107,13 +107,30 @@ async function main() {
     FAILED: 2
   }
   function createPromise(bytes) {
-    const pointer = malloc(1 + bytes);
-    i8Memory[pointer] = PROMISE_ENUM.PENDING;
-    return pointer;
+    const promisePointer = malloc(1 + bytes);
+    i8Memory[promisePointer] = PROMISE_ENUM.PENDING;
+    return promisePointer;
   }
-  function resolvePromise(pointer, value) {
-    i8Memory.set(value, pointer + 1);
-    i8Memory[pointer] = PROMISE_ENUM.RESOLVED;
+  function resolvePromise(promisePointer, value) {
+    i8Memory.set(value, promisePointer + 1);
+    i8Memory[promisePointer] = PROMISE_ENUM.RESOLVED;
+    for (const {type, pointer} of promiseChains[promisePointer] || []) {
+      switch (type) {
+        case 'closure': {
+          const nextPromisePointer = table.get(i32Memory[closurePointer])(pointer, promisePointer + 1);
+          const boundPromise = bindClosurePromise[pointer];
+          if (boundPromise) {
+            promiseChains[boundPromise] = promiseChains[boundPromise] || [];
+            promiseChains[boundPromise].push({
+              type: 'promise',
+              pointer: nextPromisePointer
+            });
+          }
+        }
+        case 'promise': {
+          resolvePromise(pointer, value);
+        }
+    }
   }
   const promiseChains = {};
   const bindClosurePromise = {};
@@ -136,7 +153,11 @@ async function main() {
     promise: {
       then(parentPromisePointer, closurePointer) {
         promiseChains[parentPromisePointer] = promiseChains[parentPromisePointer] || [];
-        promiseChains[parentPromisePointer].push(closurePointer);
+        promiseChains[parentPromisePointer].push({
+          type: 'closure',
+          pointer
+        });
+        ..this is wrong...createPromise need to be the same size as promise in closurePointer...?
         const promisePointer = createPromise(0);
         bindClosurePromise[closurePointer] = promisePointer;
         return promisePointer;
@@ -146,7 +167,12 @@ async function main() {
     external: {
       getX() {
         const promisePointer = createPromise(4);
-        getX().then((x) => resolvePromise(promisePointer, x))
+        getX().then((x) => {
+          const value = new ArrayBuffer(4);
+          const view = new Int32Array(value);
+          view[0] = x;
+          resolvePromise(promisePointer, value)
+        })
         return promisePointer;
       },
       getY() {
