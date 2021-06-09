@@ -146,5 +146,7 @@ async function main() {
   }
 
   console.log('await getX() + await getY() =', await sum());
+  // console.assert(Object.keys(promises).length === 0, 'leaked promises');  // don't know how to delete promises yet
+  console.assert(Object.keys(contexts).length === 0, 'leaked contexts');
 }
 main();
