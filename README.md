@@ -2,7 +2,7 @@
 
 [Edit on StackBlitz ⚡️](https://stackblitz.com/edit/wasm-event-loop)
 
-This is a demo of event loop inside WebAssembly. The sample implements an async function that sums values from two async other async functions.
+This is a demo of promises + closures inside WebAssembly. The sample implements an async function that sums values from two async other async functions.
 
 Pseudo-code of async sum in WebAssembly
 ```js
@@ -38,14 +38,14 @@ import {getX, getY} from './external.js';
 
 export function sum(): i32 { // i32 is pointer to promise
   const xPromise = getX();
-  const sumClosure1ContextPointer = createContext(sumClosure1, 0);
+  const sumClosure1ContextPointer = createContext(sumClosure1);
   return then(xPromise, sumClosure1ContextPointer);
 }
 
 export function sumClosure1(sumClosure1ContextPointer: i32, xValue: i32): i32 {
   deleteContext(sumClosure1ContextPointer);
   const yPromise = getY();
-  const sumClosure2ContextPointer = createContext(sumClosure2, 4);
+  const sumClosure2ContextPointer = createContext(sumClosure2);
   setScopei32Value(sumClosure2ContextPointer, 0, xValue)
   return then(yPromise, sumClosure2ContextPointer);
 }
