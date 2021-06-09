@@ -32,27 +32,26 @@ export function sum(): Promise<i32> {
 
 ...closures converted to functions
 ```js
-import {createContext, deleteContext} from './closure.js';
+import {createContext, setScopeValue, getScopeValue, deleteContext} from './closure.js';
 import {then, resolve} from './promise.js';
 import {getX, getY} from './external.js';
 
 export function sum(): i32 { // i32 is pointer to promise
   const xPromise = getX();
-  const sumClosure1ContextPointer = createContext(sumClosure1);
+  const sumClosure1ContextPointer = createContext(sumClosure1, 0);
   return then(xPromise, sumClosure1ContextPointer);
 }
 
 export function sumClosure1(sumClosure1ContextPointer: i32, xValue: i32): i32 {
   deleteContext(sumClosure1ContextPointer);
   const yPromise = getY();
-  const sumClosure2ContextPointer = createContext(sumClosure2, {
-    xValue
-  });
+  const sumClosure2ContextPointer = createContext(sumClosure2, 4);
+  setScopei32Value(sumClosure2ContextPointer, 0, xValue)
   return then(yPromise, sumClosure2ContextPointer);
 }
 
 export function sumClosure2(sumClosure2ContextPointer: i32, yValue: i32): i32 {
-  const {xValue} = sumClosure2ContextPointer.scope;
+  const xValue = getScopei32Value(sumClosure2ContextPointer, 0)
   deleteContext(sumClosure2ContextPointer);
   return resolve(xValue + yValue);
 }

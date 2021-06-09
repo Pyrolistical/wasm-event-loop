@@ -15,27 +15,14 @@ async function main() {
         (import "external" "getX" (func $getX (result i32)))
         (import "external" "getY" (func $getY (result i32)))
         
-        (func $createContext (param $tableIndex i32) (param $scopePointer i32) (result i32)) (local $pointer i32)
-          i32.const 8
-          call $malloc
-          local.tee $pointer
-          local.get $tableIndex
-          i32.store
-          local.get $pointer
-          i32.const 4
-          i32.add
-          local.get $scopePointer
-          i32.store
-          local.get $pointer
-        )
-        (func $deleteContext (param $contextPointer i32))
-          nop
-        )
+        (import "closure" "createContext" (func $createContext (param $tableIndex i32) (result i32)))
+        (import "closure" "setScopei32" (func $setScopei32 (param $contextPointer i32) (param $index i32) (param $value i32)))
+        (import "closure" "getScopei32" (func $getScopei32 (param $contextPointer i32) (param $index i32) (result i32)))
+        (import "closure" "deleteContext" (func $deleteContext (param $contextPointer i32)))
 
         (func (export "sum") (result i32) (local $xPromisePointer i32) (local $closurePointer i32)
           call $getX
           local.set $xPromisePointer
-          i32.const 0
           i32.const 0
           call $createContext
           local.set $closurePointer
@@ -49,25 +36,19 @@ async function main() {
           call $getY
           local.set $yPromisePointer
           i32.const 1
-          i32.const 4
-          call $malloc
-          local.tee $xPointer
           call $createContext
-          local.set $closurePointer
-          local.get $xPointer
+          local.tee $closurePointer
+          i32.const 0
           local.get $xValue
-          i32.store
+          call $setScopei32
           local.get $yPromisePointer
           local.get $closurePointer
           call $then
         )
         (func $sumClosure2 (param $thisClosurePointer i32) (param $yValue i32) (result i32) (local $xValue i32) (local $result i32) (local $resultPointer i32)
           local.get $thisClosurePointer
-          i32.const 4
-          i32.add
           i32.const 0
-          i32.add
-          i32.load
+          call $getScopei32
           local.set $xValue
           local.get $thisClosurePointer
           call $deleteContext
@@ -95,45 +76,21 @@ async function main() {
   const i32Memory = new Int32Array(memory.buffer);
   const i8Memory = new Int8Array(memory.buffer);
   i32Memory[0] = 4;
-  function malloc (bytes) {
+  function malloc(bytes) {
     // bump allocator
     const next = i32Memory[0];
     i32Memory[0] = next + Math.ceil(bytes);
     return next;
   }
-  const PROMISE_ENUM = {
-    PENDING: 0,
-    RESOLVED: 1,
-    FAILED: 2
+  function getTableIndex(contextPointer) {
+    return i32Memory[contextPointer];
   }
-  function createPromise(bytes) {
-    const promisePointer = malloc(1 + bytes);
-    i8Memory[promisePointer] = PROMISE_ENUM.PENDING;
-    return promisePointer;
-  }
-  function resolvePromise(promisePointer, value) {
-    i8Memory.set(value, promisePointer + 1);
-    i8Memory[promisePointer] = PROMISE_ENUM.RESOLVED;
-    for (const {type, pointer} of promiseChains[promisePointer] || []) {
-      switch (type) {
-        case 'closure': {
-          const nextPromisePointer = table.get(i32Memory[closurePointer])(pointer, promisePointer + 1);
-          const boundPromise = bindClosurePromise[pointer];
-          if (boundPromise) {
-            promiseChains[boundPromise] = promiseChains[boundPromise] || [];
-            promiseChains[boundPromise].push({
-              type: 'promise',
-              pointer: nextPromisePointer
-            });
-          }
-        }
-        case 'promise': {
-          resolvePromise(pointer, value);
-        }
-    }
-  }
-  const promiseChains = {};
-  const bindClosurePromise = {};
+
+  let nextPromiseIndex = 0;
+  const promises = {};
+
+  let nextContextIndex = 0;
+  const contexts = {};
 
   const table = new WebAssembly.Table({
     initial: 2,
@@ -141,9 +98,7 @@ async function main() {
   });
 
   const {
-    instance: {
-      exports
-    }
+    instance: { exports }
   } = await WebAssembly.instantiate(module.toBinary({}).buffer, {
     global: {
       memory,
@@ -151,48 +106,68 @@ async function main() {
       table
     },
     promise: {
-      then(parentPromisePointer, closurePointer) {
-        promiseChains[parentPromisePointer] = promiseChains[parentPromisePointer] || [];
-        promiseChains[parentPromisePointer].push({
-          type: 'closure',
-          pointer
-        });
-        ..this is wrong...createPromise need to be the same size as promise in closurePointer...?
-        const promisePointer = createPromise(0);
-        bindClosurePromise[closurePointer] = promisePointer;
+      then(parentPromisePointer, contextPointer) {
+        const promisePointer = nextPromiseIndex++;
+        promises[promisePointer] = promises[parentPromisePointer].then(
+          value => {
+            const { tableIndex } = contexts[contextPointer];
+            return table.get(tableIndex)(contextPointer, value);
+          }
+        );
         return promisePointer;
       },
-      resolve() {}
+      resolve(value) {
+        const promisePointer = nextPromiseIndex++;
+        promises[promisePointer] = Promise.resolve(value);
+        return promisePointer;
+      }
+    },
+    closure: {
+      createContext(tableIndex) {
+        const contextPointer = nextContextIndex++;
+        contexts[contextPointer] = {
+          tableIndex,
+          values: {}
+        };
+        return contextPointer;
+      },
+      setScopei32(contextPointer, index, value) {
+        contexts[contextPointer].values[index] = value;
+      },
+      getScopei32(contextPointer, index) {
+        return contexts[contextPointer].values[index];
+      },
+      deleteContext(contextIndex) {
+        delete contexts[contextIndex];
+      }
     },
     external: {
       getX() {
-        const promisePointer = createPromise(4);
-        getX().then((x) => {
-          const value = new ArrayBuffer(4);
-          const view = new Int32Array(value);
-          view[0] = x;
-          resolvePromise(promisePointer, value)
-        })
+        const promisePointer = nextPromiseIndex++;
+        promises[promisePointer] = getX();
         return promisePointer;
       },
       getY() {
-        return wasmPromise.resolve(69);
+        const promisePointer = nextPromiseIndex++;
+        promises[promisePointer] = getY();
+        return promisePointer;
       }
     }
   });
 
   async function getX() {
-    return Promise.resolve(42);
+    return 42;
   }
 
   async function getY() {
-    return new Promise((resolve) => setTimeout(() => resolve(69), 100));
+    return new Promise(resolve => setTimeout(() => resolve(69), 100));
   }
 
   async function sum() {
-    const promise = exports.sum();
+    const promisePointer = exports.sum();
+    return promises[promisePointer];
   }
 
-  console.log(await sum())
+  console.log(await sum());
 }
 main();
